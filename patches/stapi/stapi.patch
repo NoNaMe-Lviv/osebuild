@@ -1,26 +1,23 @@
-Index: Makefile
-===================================================================
---- Makefile	(revision 11438)
-+++ Makefile	(working copy)
-@@ -91,7 +91,9 @@
- TARGET := $(shell $(CC) -dumpmachine 2>/dev/null)
- 
- # Process USE_ variables
-+ifneq ($(AL_MODEL),supremo)
- DEFAULT_STAPI_LIB = -L./stapi -loscam_stapi
-+endif
- DEFAULT_STAPI5_LIB = -L./stapi -loscam_stapi5
- DEFAULT_COOLAPI_LIB = -lnxp -lrt
- DEFAULT_COOLAPI2_LIB = -llnxUKAL -llnxcssUsr -llnxscsUsr -llnxnotifyqUsr -llnxplatUsr -lrt
 Index: csctapi/ifd_stapi.c
 ===================================================================
---- csctapi/ifd_stapi.c	(revision 11438)
+--- csctapi/ifd_stapi.c	(revision 11486)
 +++ csctapi/ifd_stapi.c	(working copy)
-@@ -37,6 +37,10 @@
+@@ -19,6 +19,10 @@
+ extern char *STReader_GetRevision(void);
+ #endif
+ 
++#if defined(__ANDROID__)
++extern char *WiSmart_Init(void);
++#endif
++
+ #define OK 0
+ #define ERROR 1
+ 
+@@ -37,6 +41,10 @@
  	STReader_GetRevision();
  #endif
- 	
-+#if defined(supremo)
+ 
++#if defined(__ANDROID__)
 +	WiSmart_Init();
 +#endif
 +
@@ -29,16 +26,23 @@ Index: csctapi/ifd_stapi.c
  
 Index: module-dvbapi-stapi.c
 ===================================================================
---- module-dvbapi-stapi.c	(revision 11438)
+--- module-dvbapi-stapi.c	(revision 11486)
 +++ module-dvbapi-stapi.c	(working copy)
-@@ -71,6 +71,25 @@
+@@ -71,6 +71,32 @@
  static pthread_mutex_t filter_lock;
  static struct STDEVICE dev_list[PTINUM];
  
-+#if defined(supremo)
++#if defined(__ANDROID__)
++
++extern char *WiDemux_Init(void);
++extern uint32_t WiDumpMemory(uchar *filt, int i, int c);
++extern uint32_t WiDemux_FilterStop(uint32_t filt);
++extern uint32_t WiDemux_DescramblerKeyExt(int dmxid_ch, uint16_t *pids, int32_t count, uchar *cw);
++extern uint32_t WiDemux_FilterStart(int32_t sel, uint16_t pids, int i, uchar *filt, uchar *mask, int section, int continues, int queue, int callback, int timeout, int in);
++
 +static void parse_pmt_filename(char *pmtfile, int *dmxid, int *channel)
 +{
-+	int i;
++	unsigned int i;
 +	char file[132];
 +
 +	for (i = 0; i < strlen(pmtfile); i++)
@@ -57,23 +61,23 @@ Index: module-dvbapi-stapi.c
  static void stapi_off(void)
  {
  	int32_t i;
-@@ -94,7 +113,9 @@
+@@ -94,7 +120,9 @@
  			{
  				oscam_stapi_SignalAbort(dev_list[i].SignalHandle);
  			}
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  			pthread_cancel(dev_list[i].thread);
 +#endif
  		}
  	}
  
-@@ -105,14 +126,15 @@
+@@ -105,14 +133,15 @@
  
  int32_t stapi_open(void)
  {
 +	stapi_on = 1;
 +	int32_t i;
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  	uint32_t ErrorCode;
  
  	DIR *dirp;
@@ -85,7 +89,7 @@ Index: module-dvbapi-stapi.c
  	int32_t stapi_priority = 0;
  
  	dirp = opendir(PROCDIR);
-@@ -121,9 +143,14 @@
+@@ -121,9 +150,14 @@
  		cs_log("opendir failed (errno=%d %s)", errno, strerror(errno));
  		return 0;
  	}
@@ -96,11 +100,11 @@ Index: module-dvbapi-stapi.c
  
  	memset(dev_list, 0, sizeof(struct STDEVICE)*PTINUM);
  
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  	if(dvbapi_priority)
  	{
  		struct s_dvbapi_priority *p;
-@@ -199,10 +226,23 @@
+@@ -199,10 +233,23 @@
  	closedir(dirp);
  
  	if(i == 0) { return 0; }
@@ -116,7 +120,7 @@ Index: module-dvbapi-stapi.c
 +
  	SAFE_MUTEX_INIT(&filter_lock, NULL);
  
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +	for(i = 0; i < 1; i++)
 +#else
  	for(i = 0; i < PTINUM; i++)
@@ -124,28 +128,28 @@ Index: module-dvbapi-stapi.c
  	{
  		if(dev_list[i].SessionHandle == 0)
  			{ continue; }
-@@ -260,6 +300,10 @@
+@@ -264,6 +311,10 @@
  
  	cs_log_dbg(D_DVBAPI, "pmt file %s demux_id %d", pmtfile, demux_id);
  
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +	int dmxid, channel;
 +	parse_pmt_filename(pmtfile, &dmxid, &channel);
 +#endif
  	for(p = dvbapi_priority; p != NULL; p = p->next)
  	{
  		if(p->type != 's') { continue; }  // stapi rule?
-@@ -267,10 +311,17 @@
+@@ -271,10 +322,17 @@
  
  		for(i = 0; i < PTINUM; i++)
  		{
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +			cs_log_dbg(D_DVBAPI, "%d [%s][%s]", i, dev_list[i].name, p->devname);
 +#endif
  			if(strcmp(dev_list[i].name, p->devname) == 0 && p->disablefilter == 0)  // check device name and if filtering is enabled!
  			{
  				cs_log_dbg(D_DVBAPI, "set stapi filter on %s for pid %04X", dev_list[i].name, pids[0]);
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +				ret = stapi_do_set_filter(/*demux_id*/(dmxid << 8) | (channel << 0), &dev_list[i].demux_fd[demux_id][num], pids, 1, filter, mask, i);
 +#else
  				ret = stapi_do_set_filter(demux_id, &dev_list[i].demux_fd[demux_id][num], pids, 1, filter, mask, i);
@@ -153,42 +157,42 @@ Index: module-dvbapi-stapi.c
  				if(ret > 0)    // success
  				{
  					cs_log_dbg(D_DVBAPI, "%s filter %d set (pid %04X)", dev_list[i].name, num, pid);
-@@ -326,7 +377,7 @@
+@@ -330,7 +388,7 @@
  	}
  	return ret;
  }
 -
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  static uint32_t check_slot(int32_t dev_id, uint32_t checkslot, FILTERTYPE *skipfilter)
  {
  	int32_t d, f, l;
-@@ -347,19 +398,129 @@
+@@ -351,19 +409,129 @@
  	}
  	return 0;
  }
 +#endif
  
 -
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +static int32_t stapi_do_set_filter(int32_t sel, FILTERTYPE *filter, uint16_t *pids, int32_t pidcount, uchar *filt, uchar *mask, int32_t dev_id)
 +#else
- static int32_t stapi_do_set_filter(int32_t demux_id, FILTERTYPE *filter, uint16_t *pids, int32_t pidcount, uchar *filt, uchar *mask, int32_t dev_id)
+ static int32_t stapi_do_set_filter(int32_t demux_id, FILTERTYPE *filter, uint16_t *pids, int32_t pidcount, uint8_t *filt, uint8_t *mask, int32_t dev_id)
 +#endif
  {
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  	uint32_t FilterAssociateError = 0;
 +#endif
  	int32_t k, ret = 0;
  
  	filter->fd          = 0;
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  	filter->BufferHandle[0]     = 0;
 +#endif
  	filter->SlotHandle[0]   = 0;
  
  	if(dev_list[dev_id].SessionHandle == 0) { return 0; }
  
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +	int section = 0;
 +	int continues = 0;
 +
@@ -293,7 +297,7 @@ Index: module-dvbapi-stapi.c
  	uint32_t FilterAllocateError = oscam_stapi_FilterAllocate(dev_list[dev_id].SessionHandle, &filter->fd);
  
  	if(FilterAllocateError != 0)
-@@ -414,17 +575,36 @@
+@@ -418,17 +586,36 @@
  	{
  		return filter->fd; // return fd of filter
  	}
@@ -304,14 +308,14 @@ Index: module-dvbapi-stapi.c
  {
  	if(filter->fd == 0) { return 0; }
 -
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  	uint32_t BufferDeallocateError = 0, SlotDeallocateError = 0;
 -
 +#endif
  	if(dev_list[dev_id].SessionHandle == 0) { return 0; }
  
  	int32_t k;
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +	cs_log("[%s] dev_id(%d) SessionHandle [0x%08x] NumSlots(%d)", __func__, dev_id, dev_list[dev_id].SessionHandle, filter->NumSlots );
 +	if(filter->NumSlots > 1)
 +	{
@@ -332,7 +336,7 @@ Index: module-dvbapi-stapi.c
  	for(k = 0; k < filter->NumSlots; k++)
  	{
  		uint32_t checkslot = check_slot(dev_id, filter->SlotHandle[k], filter);
-@@ -449,6 +629,7 @@
+@@ -453,6 +640,7 @@
  	{
  		return 1;
  	}
@@ -340,27 +344,27 @@ Index: module-dvbapi-stapi.c
  }
  
  static void stapi_cleanup_thread(void *dev)
-@@ -472,14 +653,17 @@
+@@ -476,14 +664,17 @@
  	dev_index = para->id;
  
  	SAFE_SETSPECIFIC(getclient, para->cli);
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 +#endif
  	pthread_cleanup_push(stapi_cleanup_thread, (void *) dev_index);
 -
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  	int32_t error_count = 0;
 -
 +#endif
  	while(!exit_oscam)
  	{
  		QueryBufferHandle = 0;
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  		ErrorCode = oscam_stapi_SignalWaitBuffer(dev_list[dev_index].SignalHandle, &QueryBufferHandle, 1000);
  
  		switch(ErrorCode)
-@@ -512,6 +696,7 @@
+@@ -516,6 +707,7 @@
  			continue;
  			break;
  		}
@@ -368,30 +372,30 @@ Index: module-dvbapi-stapi.c
  
  		uint32_t NumFilterMatches = 0;
  		int32_t demux_id = 0, filter_num = 0;
-@@ -538,6 +723,10 @@
+@@ -542,6 +734,10 @@
  			{
  				for(j = 0; j < MAX_FILTER; j++)
  				{
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +					for (dev_index = 0; dev_index < PTINUM; dev_index++)
 +#endif
 +					{
  					if(dev_list[dev_index].demux_fd[i][j].fd == MatchedFilterList[k])
  					{
  						demux_id = i;
-@@ -544,10 +733,42 @@
+@@ -548,10 +744,42 @@
  						filter_num = j;
  
  						dvbapi_process_input(demux_id, filter_num, buf, DataSize, 0);
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +							goto _read_end;
 +#endif
  					}
 +
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +						if (dev_list[dev_index].demux_fd[i][j].NumSlots > 1)
 +						{
-+							uint32_t l;
++							int32_t l;
 +							for (l = 1; l < dev_list[dev_index].demux_fd[i][j].NumSlots; l++)
 +							{
 +								if (dev_list[dev_index].demux_fd[i][j].SlotHandle[l] == MatchedFilterList[k])
@@ -406,7 +410,7 @@ Index: module-dvbapi-stapi.c
 +					}
  				}
  			}
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +			if (i == MAX_DEMUX)
 +			{
 +				//cs_log("[%s] ####### unknown filter...(0x%08x)", __func__, MatchedFilterList[k]);
@@ -416,21 +420,21 @@ Index: module-dvbapi-stapi.c
  		}
 +
 +
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +_read_end :
 +#endif
  		SAFE_MUTEX_UNLOCK(&filter_lock);
  	}
- 	
-@@ -562,6 +783,7 @@
+ 
+@@ -566,6 +794,7 @@
  #define DE_START 0
  #define DE_STOP 1
  
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  static void stapi_DescramblerAssociate(int32_t demux_id, uint16_t pid, int32_t mode, int32_t n)
  {
  	uint32_t Slot = 0;
-@@ -621,6 +843,7 @@
+@@ -625,6 +854,7 @@
  
  	return;
  }
@@ -438,20 +442,20 @@ Index: module-dvbapi-stapi.c
  
  static void stapi_startdescrambler(int32_t demux_id, int32_t dev_index, int32_t mode)
  {
-@@ -673,13 +896,19 @@
+@@ -677,13 +907,20 @@
  
- int32_t stapi_write_cw(int32_t demux_id, uchar *cw, uint16_t *STREAMpids, int32_t STREAMpidcount, char *pmtfile)
+ int32_t stapi_write_cw(int32_t demux_id, uint8_t *cw, uint16_t *STREAMpids, int32_t STREAMpidcount, char *pmtfile)
  {
-+#if !defined(supremo)
++#if !defined(__ANDROID__)
  	int32_t ErrorCode, l, n, k;
- 	unsigned char nullcw[8];
+ 	uint8_t nullcw[8];
  	memset(nullcw, 0, 8);
  	char *text[] = { "even", "odd" };
--
 +#endif
+ 
  	if(!pmtfile) { return 0; }
  
-+#if defined(supremo)
++#if defined(__ANDROID__)
 +
 +	int32_t n;
 +	int dmxid, channel;
@@ -459,7 +463,7 @@ Index: module-dvbapi-stapi.c
  	for(n = 0; n < PTINUM; n++)
  	{
  		if(dev_list[n].SessionHandle == 0) { continue; }
-@@ -693,8 +922,33 @@
+@@ -697,8 +934,33 @@
  				if(strcmp(pmtfile, p->pmtfile) != 0)
  					{ continue; }
  
@@ -493,7 +497,7 @@ Index: module-dvbapi-stapi.c
  					cs_log_dbg(D_DVBAPI, "start descrambling PTI: %s", dev_list[n].name);
  					stapi_startdescrambler(demux_id, n, DE_START);
  				}
-@@ -736,6 +990,7 @@
+@@ -740,6 +1002,7 @@
  			}
  		}
  	}
@@ -503,36 +507,36 @@ Index: module-dvbapi-stapi.c
  }
 Index: module-dvbapi.c
 ===================================================================
---- module-dvbapi.c	(revision 11438)
+--- module-dvbapi.c	(revision 11486)
 +++ module-dvbapi.c	(working copy)
-@@ -287,7 +287,9 @@
+@@ -351,7 +351,9 @@
  static int32_t selected_box = -1;
  static int32_t selected_api = -1;
  static int32_t maxfilter = MAX_FILTER;
-+#if !defined(supremo)
++#if !defined(__ANDROID__) && defined(WITH_STAPI)
  static int32_t dir_fd = -1;
 +#endif
  static uint16_t last_client_proto_version = 0;
- static char* last_client_name = NULL;
- 
-@@ -727,11 +729,31 @@
+ static char *last_client_name = NULL;
+ static int32_t ca_fd[MAX_DEMUX]; // holds fd handle of each ca device 0 = not in use
+@@ -831,11 +833,31 @@
  {
  	int32_t ret = -1, n = -1, i, filterfd = -1;
  
 -	for(i = 0; i < maxfilter && demux[demux_id].demux_fd[i].fd > 0; i++) { ; }
-+#if defined(supremo)
++#if defined(__ANDROID__) && defined(WITH_STAPI)
 +	int32_t more_cnt = 0;
 +#endif
  
 +	for(i = 0; i < maxfilter && demux[demux_id].demux_fd[i].fd > 0; i++)
 +	{
-+#if defined(supremo)
++#if defined(__ANDROID__) && defined(WITH_STAPI)
 +		if(demux[demux_id].demux_fd[i].NumSlots > 1)
 +			more_cnt += (maxfilter && demux[demux_id].demux_fd[i].NumSlots - 1);
 +#endif
 +	}
 +
-+#if defined(supremo)
++#if defined(__ANDROID__) && defined(WITH_STAPI)
 +	i += more_cnt;
 +#endif
 +
@@ -549,7 +553,7 @@ Index: module-dvbapi.c
  		return -1;
  	}
  	n = i;
-@@ -903,10 +925,12 @@
+@@ -1040,10 +1062,12 @@
  		cfg.dvbapi_listenport = 0;
  	}
  
@@ -558,25 +562,29 @@ Index: module-dvbapi.c
  	char device_path[128], device_path2[128];
  	static LLIST *ll_max_fd;
  	ll_max_fd = ll_create("ll_max_fd");
-+#if !defined(supremo)
++#if !defined(__ANDROID__) && defined(WITH_STAPI)
 +	int32_t dmx_fd = 0;
  	LL_ITER itr;
  
  	struct s_open_fd
-@@ -915,6 +939,7 @@
+@@ -1051,6 +1075,7 @@
+ 		uint32_t fd;
  	};
- 
  	struct s_open_fd *open_fd;
 +#endif
  
- 	while (i < BOX_COUNT)
+ 	while(i < BOX_COUNT)
  	{
-@@ -924,6 +949,13 @@
+@@ -1058,9 +1083,16 @@
+ 		{
+ 			snprintf(device_path2, sizeof(device_path2), devices[i].demux_device, 0);
  			snprintf(device_path, sizeof(device_path), devices[i].path, n);
- 			strncat(device_path, device_path2, sizeof(device_path) - strlen(device_path) - 1);
+-			strncat(device_path, device_path2, sizeof(device_path) - strlen(device_path));
++			strncat(device_path, device_path2, sizeof(device_path) - strlen(device_path) - 1);
+ 
  			filtercount = 0;
 +
-+#if defined(supremo)
++#if defined(__ANDROID__) && defined(WITH_STAPI)
 +			if(devices[i].api == STAPI)
 +			{
 +				filtercount = 32; // wi
@@ -585,7 +593,7 @@ Index: module-dvbapi.c
  			while((dmx_fd = open(device_path, O_RDWR | O_NONBLOCK)) > 0 && filtercount < MAX_FILTER)
  			{
  				filtercount++;
-@@ -935,9 +967,11 @@
+@@ -1072,9 +1104,11 @@
  				open_fd->fd = dmx_fd;
  				ll_append(ll_max_fd, open_fd);
  			}
@@ -593,23 +601,41 @@ Index: module-dvbapi.c
  
  			if(filtercount > 0)
  			{
-+#if !defined(supremo)
++#if !defined(__ANDROID__) && defined(WITH_STAPI)
  				itr = ll_iter_create(ll_max_fd);
  				while((open_fd = ll_iter_next(&itr)))
  				{
-@@ -949,6 +983,7 @@
- 					while(close(dmx_fd)<0);
+@@ -1086,6 +1120,7 @@
+ 					while(close(dmx_fd) < 0);
  					ll_iter_remove_data(&itr);
  				}
 +#endif
  				devnum = i;
  				selected_api = devices[devnum].api;
  				selected_box = devnum;
-@@ -5273,6 +5308,14 @@
+@@ -1197,7 +1232,7 @@
+ 	{
+ 		snprintf(device_path2, sizeof(device_path2), devices[selected_box].demux_device, num);
+ 		snprintf(device_path, sizeof(device_path), devices[selected_box].path, adapter);
+-		strncat(device_path, device_path2, sizeof(device_path) - strlen(device_path));
++		strncat(device_path, device_path2, sizeof(device_path) - strlen(device_path) - 1);
+ 	}
+ 	else
+ 	{
+@@ -1213,7 +1248,7 @@
+ 
+ 		snprintf(device_path2, sizeof(device_path2), devices[selected_box].ca_device, num + ca_offset);
+ 		snprintf(device_path, sizeof(device_path), devices[selected_box].path, adapter);
+-		strncat(device_path, device_path2, sizeof(device_path) - strlen(device_path));
++		strncat(device_path, device_path2, sizeof(device_path) - strlen(device_path) - 1);
+ 	}
+ 
+ 	if(cfg.dvbapi_boxtype == BOXTYPE_SAMYGO)
+@@ -6088,6 +6123,14 @@
  
  	if(cfg.dvbapi_pmtmode != 4 && cfg.dvbapi_pmtmode != 5 && cfg.dvbapi_pmtmode != 6)
  	{
-+#if defined(supremo)
++#if defined(__ANDROID__) && defined(WITH_STAPI)
 +		// there is no /tmp.
 +		// for test, run test_hi.sh
 +		// it makes link /tmp to /mnt/ramdisk
@@ -620,7 +646,7 @@ Index: module-dvbapi.c
  		struct sigaction signal_action;
  		signal_action.sa_handler = event_handler;
  		sigemptyset(&signal_action.sa_mask);
-@@ -5286,6 +5329,7 @@
+@@ -6101,6 +6144,7 @@
  			fcntl(dir_fd, F_NOTIFY, DN_MODIFY | DN_CREATE | DN_DELETE | DN_MULTISHOT);
  			event_handler(SIGRTMIN + 1);
  		}
@@ -630,17 +656,18 @@ Index: module-dvbapi.c
  	{
 Index: module-newcamd.c
 ===================================================================
---- module-newcamd.c	(revision 11438)
+--- module-newcamd.c	(revision 11486)
 +++ module-newcamd.c	(working copy)
-@@ -563,6 +563,11 @@
+@@ -563,6 +563,12 @@
  	if(rs < 5) { rc = (-1); }
  	else { rc = rs; }
  
-+#if defined(supremo)
++/* 
++#if defined(__ANDROID__) && defined(WITH_STAPI)
 +	if(rs == 5)
 +		 cs_sleepms(10); // mg when init.
 +#endif
-+
++ */
  	cs_log_dump_dbg(D_CLIENT, buf, rs, "received %d bytes from %s", rs, remote_txt());
  	client->last = time((time_t *) 0);
  
